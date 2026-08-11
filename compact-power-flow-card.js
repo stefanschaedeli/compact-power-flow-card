@@ -37,6 +37,9 @@
  *   flow_threshold:      optional; W below which a flow counts as idle
  *                        (default 25; also gates the battery direction word)
  *   pv_threshold:        optional; W below which the PV node dims (default 50)
+ *   show_labels:         optional; false hides all node sub-labels (names,
+ *                        direction words, daily yield) for an icons+numbers
+ *                        only look (default true)
  *   labels:              optional map overriding the English default labels
  *                        (pv, grid, house, battery, grid_import, grid_export,
  *                        battery_charge, battery_discharge, daily_yield —
@@ -47,7 +50,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -228,6 +231,7 @@ class CompactPowerFlowCard extends HTMLElement {
     this._config.pv_threshold =
       Number.isFinite(config.pv_threshold) && config.pv_threshold >= 0
         ? config.pv_threshold : 50;
+    this._config.show_labels = config.show_labels !== false;
     this._labels = { ...DEFAULT_LABELS, ...(config.labels || {}) };
     const f = config.filter || {};
     this._include = (f.include || []).map(compileRule);
@@ -360,6 +364,7 @@ class CompactPowerFlowCard extends HTMLElement {
                 opacity: .8; transform-box: fill-box; }
         .value { font: 700 12px sans-serif; fill: var(--primary-text-color, #212121); }
         .sub { font: 400 10px sans-serif; fill: var(--secondary-text-color, #727272); }
+        svg.hide-labels .sub { display: none; }
         .seg { cursor: pointer; }
         .seg-name { font: 400 9px sans-serif; fill: var(--secondary-text-color, #727272);
                     cursor: pointer; }
@@ -368,6 +373,7 @@ class CompactPowerFlowCard extends HTMLElement {
       </style>
       <ha-card>
         <svg viewBox="0 0 520 160" preserveAspectRatio="xMidYMid meet"
+             class="${this._config.show_labels ? "" : "hide-labels"}"
              role="img" aria-label="Power flow">
           ${flowPaths}
           ${nodes}
@@ -545,6 +551,7 @@ const EDITOR_LABELS = {
   line_boldness: "Line boldness (1 subtle … 5 aggressive)",
   flow_threshold: "Hide flow lines below (W)",
   pv_threshold: "Dim PV node below (W)",
+  show_labels: "Show labels (names, direction words, daily yield)",
   label_pv: `PV node label (default "${DEFAULT_LABELS.pv}")`,
   label_grid: `Grid node label (default "${DEFAULT_LABELS.grid}")`,
   label_house: `House node label (default "${DEFAULT_LABELS.house}")`,
@@ -655,6 +662,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       { name: "line_boldness", selector: { number: { min: 1, max: 5, step: 0.5, mode: "box" } } },
       { name: "flow_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
       { name: "pv_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
+      { name: "show_labels", selector: { boolean: {} } },
       ...LABEL_KEYS.map((k) => ({ name: `label_${k}`, selector: { text: {} } })),
     );
 
@@ -668,6 +676,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       data.filter = c.filter;
     }
     for (const k of NUMBER_KEYS) if (c[k] !== undefined) data[k] = c[k];
+    data.show_labels = c.show_labels !== false;
     const labels = c.labels || {};
     for (const k of LABEL_KEYS) if (labels[k] !== undefined) data[`label_${k}`] = labels[k];
 
@@ -701,6 +710,8 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       if (d[k] === undefined || d[k] === "") delete cfg[k];
       else cfg[k] = d[k];
     }
+    if (d.show_labels === false) cfg.show_labels = false;
+    else delete cfg.show_labels;
     const labels = {};
     for (const k of LABEL_KEYS) {
       const v = d[`label_${k}`];

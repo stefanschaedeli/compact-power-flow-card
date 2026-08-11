@@ -91,7 +91,9 @@ power-pie-card. Without a `filter`, the column is absent.
 ### Labels
 
 All visible texts default to English; every label can be overridden — in YAML
-or via its own text field in the GUI editor:
+or via its own text field in the GUI editor. Set `show_labels: false` (a
+toggle in the editor) to hide all sub-labels — names, direction words, and the
+daily-yield line — for an icons-and-numbers-only card:
 
 ```yaml
 labels:            # example: German
