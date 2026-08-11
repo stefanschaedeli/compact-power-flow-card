@@ -35,7 +35,7 @@
  *     daily_yield: "today" / grid_import: "import"
  */
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 
 // Flows below this many watts count as "not flowing".
 const THRESHOLD = 25;
@@ -54,7 +54,7 @@ const NODE = {
 };
 
 // Consumer column geometry (right of the house node).
-const COL = { x: 460, w: 24, top: 12, bottom: 148, gap: 1.5, minSeg: 14, rx: 2 };
+const COL = { x: 394, w: 24, top: 12, bottom: 148, gap: 1.5, minSeg: 14, rx: 2 };
 
 // Flow definitions; path d strings are generated from node coordinates.
 // Direction of travel = path direction.
@@ -394,15 +394,14 @@ class CompactPowerFlowCard extends HTMLElement {
       const h = heights[i];
       const top = yBottom - h;
       const cy = top + h / 2 + 3; // text baseline ≈ vertical center
-      const name = c.name.length > 14 ? `${c.name.slice(0, 13)}…` : c.name;
+      const name = c.name.length > 11 ? `${c.name.slice(0, 10)}…` : c.name;
       const color = palette[i % palette.length];
       parts.push(`
         <rect class="seg" data-entity="${c.id}" x="${COL.x}" y="${top.toFixed(1)}"
               width="${COL.w}" height="${h.toFixed(1)}" rx="${COL.rx}" fill="${color}"/>
-        <text class="seg-name" data-entity="${c.id}" x="${COL.x - 6}" y="${cy.toFixed(1)}"
-              text-anchor="end">${name}</text>
-        <text class="seg-val" data-entity="${c.id}" x="${COL.x + COL.w + 6}" y="${cy.toFixed(1)}"
-              text-anchor="start">${this._fmtW(c.watts)}</text>`);
+        <text data-entity="${c.id}" x="${COL.x + COL.w + 6}" y="${cy.toFixed(1)}"
+              text-anchor="start"><tspan class="seg-name" data-entity="${c.id}">${name}</tspan><tspan
+              class="seg-val" data-entity="${c.id}" dx="4">${this._fmtW(c.watts)}</tspan></text>`);
       yBottom = top - COL.gap;
     });
     g.innerHTML = parts.join("");
