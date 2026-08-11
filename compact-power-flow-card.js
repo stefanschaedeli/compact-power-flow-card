@@ -50,7 +50,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -85,6 +85,11 @@ const ICONS = {
   house: "M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5",
   battery: "M7 7h9a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm13 3v4",
 };
+
+// Per-icon horizontal nudge (SVG units): the grid bolt and battery glyphs
+// are not centered in their own 24x24 boxes — compensate so the visual
+// center matches the ring center (measured, not guessed).
+const ICON_NUDGE = { grid: 0.75, battery: -0.38 };
 
 // Sub-label placement per node: battery sits beside the ring to keep the
 // card flat; pv's sub doubles as the daily-yield readout.
@@ -326,7 +331,7 @@ class CompactPowerFlowCard extends HTMLElement {
             ? `<circle class="ring battery base" r="${n.r}"/>
           <circle class="ring battery arc" id="soc-arc" r="${n.r}" pathLength="100" transform="rotate(-90)"/>`
             : `<circle class="ring ${k}" r="${n.r}"/>`}
-          <path class="icon" d="${ICONS[k]}" transform="translate(-9,-17) scale(0.75)"/>
+          <path class="icon" d="${ICONS[k]}" transform="translate(${(-9 + (ICON_NUDGE[k] || 0)).toFixed(2)},-17) scale(0.75)"/>
           <text class="value" id="val-${k}" y="12" text-anchor="middle"></text>
           <text class="sub" id="sub-${k}" ${SUB_POS[k]}></text>
         </g>`
@@ -361,7 +366,7 @@ class CompactPowerFlowCard extends HTMLElement {
         .node.idle .ring, .node.idle .icon, .node.idle .value { opacity: .3; }
         .icon { fill: none; stroke: var(--secondary-text-color, #727272);
                 stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
-                opacity: .8; transform-box: fill-box; }
+                opacity: .8; }
         .value { font: 700 12px sans-serif; fill: var(--primary-text-color, #212121); }
         .sub { font: 400 10px sans-serif; fill: var(--secondary-text-color, #727272); }
         svg.hide-labels .sub { display: none; }
