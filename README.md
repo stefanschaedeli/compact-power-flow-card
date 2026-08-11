@@ -90,19 +90,20 @@ power-pie-card. Without a `filter`, the column is absent.
 
 ### Labels
 
-All visible texts default to German and can be overridden:
+All visible texts default to English; every label can be overridden — in YAML
+or via its own text field in the GUI editor:
 
 ```yaml
-labels:
+labels:            # example: German
   pv: PV
-  grid: Grid
-  house: Home
-  battery: Battery
-  grid_import: import
-  grid_export: export
-  battery_charge: charging
-  battery_discharge: discharging
-  daily_yield: today
+  grid: Netz
+  house: Haus
+  battery: Batterie
+  grid_import: Bezug
+  grid_export: Einspeisung
+  battery_charge: lädt
+  battery_discharge: entlädt
+  daily_yield: heute
 ```
 
 ### Behavior details

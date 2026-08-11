@@ -37,15 +37,17 @@
  *   flow_threshold:      optional; W below which a flow counts as idle
  *                        (default 25; also gates the battery direction word)
  *   pv_threshold:        optional; W below which the PV node dims (default 50)
- *   labels:              optional map to override labels, e.g.
- *     daily_yield: "today" / grid_import: "import"
+ *   labels:              optional map overriding the English default labels
+ *                        (pv, grid, house, battery, grid_import, grid_export,
+ *                        battery_charge, battery_discharge, daily_yield —
+ *                        each editable individually in the GUI editor)
  *
  * The battery ring doubles as the SOC gauge: full circle = 100 %, the arc
  * drains counter-clockwise from 12 o'clock; the ring center shows the
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -101,16 +103,18 @@ const REQUIRED = [
   "house",
 ];
 
+// English defaults; every label is overridable via the `labels` config map
+// (each one is an individual text field in the GUI editor).
 const DEFAULT_LABELS = {
   pv: "PV",
-  grid: "Netz",
-  house: "Haus",
-  battery: "Batterie",
-  grid_import: "Bezug",
-  grid_export: "Einspeisung",
-  battery_charge: "lädt",
-  battery_discharge: "entlädt",
-  daily_yield: "heute",
+  grid: "Grid",
+  house: "Home",
+  battery: "Battery",
+  grid_import: "import",
+  grid_export: "export",
+  battery_charge: "charging",
+  battery_discharge: "discharging",
+  daily_yield: "today",
 };
 
 // --- filter helpers (ported verbatim from power-pie-card) ------------------
@@ -540,11 +544,22 @@ const EDITOR_LABELS = {
   line_boldness: "Line boldness (1 subtle … 5 aggressive)",
   flow_threshold: "Hide flow lines below (W)",
   pv_threshold: "Dim PV node below (W)",
-  labels: "Label overrides (advanced)",
+  label_pv: `PV node label (default "${DEFAULT_LABELS.pv}")`,
+  label_grid: `Grid node label (default "${DEFAULT_LABELS.grid}")`,
+  label_house: `House node label (default "${DEFAULT_LABELS.house}")`,
+  label_battery: `Battery idle label (default "${DEFAULT_LABELS.battery}")`,
+  label_grid_import: `Grid import label (default "${DEFAULT_LABELS.grid_import}")`,
+  label_grid_export: `Grid export label (default "${DEFAULT_LABELS.grid_export}")`,
+  label_battery_charge: `Battery charging label (default "${DEFAULT_LABELS.battery_charge}")`,
+  label_battery_discharge: `Battery discharging label (default "${DEFAULT_LABELS.battery_discharge}")`,
+  label_daily_yield: `Daily yield prefix (default "${DEFAULT_LABELS.daily_yield}")`,
 };
 
 // Simple numeric options managed 1:1 between config and editor form.
 const NUMBER_KEYS = ["max_consumers", "line_boldness", "flow_threshold", "pv_threshold"];
+
+// Label keys, each surfaced as its own text field (form name: label_<key>).
+const LABEL_KEYS = Object.keys(DEFAULT_LABELS);
 
 class CompactPowerFlowCardEditor extends HTMLElement {
   constructor() {
@@ -639,7 +654,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       { name: "line_boldness", selector: { number: { min: 1, max: 5, step: 0.5, mode: "box" } } },
       { name: "flow_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
       { name: "pv_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
-      { name: "labels", selector: { object: {} } },
+      ...LABEL_KEYS.map((k) => ({ name: `label_${k}`, selector: { text: {} } })),
     );
 
     const data = {};
@@ -652,7 +667,8 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       data.filter = c.filter;
     }
     for (const k of NUMBER_KEYS) if (c[k] !== undefined) data[k] = c[k];
-    if (c.labels !== undefined) data.labels = c.labels;
+    const labels = c.labels || {};
+    for (const k of LABEL_KEYS) if (labels[k] !== undefined) data[`label_${k}`] = labels[k];
 
     this._form.schema = schema;
     this._form.data = data;
@@ -684,8 +700,13 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       if (d[k] === undefined || d[k] === "") delete cfg[k];
       else cfg[k] = d[k];
     }
-    if (d.labels === undefined || (d.labels && !Object.keys(d.labels).length)) delete cfg.labels;
-    else cfg.labels = d.labels;
+    const labels = {};
+    for (const k of LABEL_KEYS) {
+      const v = d[`label_${k}`];
+      if (v !== undefined && v !== "") labels[k] = v;
+    }
+    if (Object.keys(labels).length) cfg.labels = labels;
+    else delete cfg.labels;
     this._config = cfg;
     this._analyzeFilter();
     this.dispatchEvent(new CustomEvent("config-changed", {
