@@ -17,11 +17,12 @@ roughly a quarter of the space.
   relevant entity actually changes state. Flow animation is pure CSS.
 - **Theme-aware** — uses HA's `--energy-*-color` and text/background theme
   variables with sensible fallbacks; adapts to light/dark automatically.
-- **Lines only when power flows** — flows below 25 W are fully hidden, so an
-  idle system shows just the nodes.
-- Flow **thickness scales with power** (1.5 px near the threshold up to 6 px at
-  ≥ 5 kW, square-root scaled) and dash speed does too (4 s at ~50 W down to
-  0.8 s at ≥ 5 kW).
+- **Lines only when power flows** — flows below `flow_threshold` (default
+  25 W) are fully hidden, so an idle system shows just the nodes.
+- Flow **thickness and dash speed scale with power** (square-root scaled), with
+  a configurable `line_boldness` factor for how aggressively they react.
+- **Battery ring = SOC gauge** — the arc drains counter-clockwise as the
+  battery empties; the center shows charge/discharge power.
 - **Top-consumers column** — auto-discovers your biggest current loads via an
   include/exclude filter ([power-pie-card](https://github.com/stefanschaedeli/power-pie-card)
   semantics), stacks them proportionally, tap opens more-info.
@@ -70,6 +71,10 @@ filter:                                      # optional: enables the consumers c
   exclude:
     - state: "< 1"
 max_consumers: 4                             # optional, 1-6 segments (default 4)
+line_boldness: 2                             # optional, 1-5 (default 2): how hard
+                                             #   line width/speed react to power
+flow_threshold: 25                           # optional, W: flows below are hidden
+pv_threshold: 50                             # optional, W: PV node dims below
 ```
 
 ### Top-consumers column
@@ -104,8 +109,16 @@ labels:
 
 - **Grid node** shows whichever is larger of import/export with the matching
   label.
-- **Battery node** shows SOC inside the ring; charging/discharging power (net
-  of the charge and discharge sensors) appears beside it when above 25 W.
+- **Battery node**: the ring itself is the SOC gauge — full circle at 100 %,
+  the arc drains counter-clockwise from 12 o'clock, the empty part stays as a
+  faint track. The center shows the current charge/discharge power (net of the
+  charge and discharge sensors); the side label shows the direction
+  (`lädt`/`entlädt`). No percentage is displayed.
+- **PV node** dims to 30 % opacity below `pv_threshold` (default 50 W); the
+  daily-yield line stays fully readable.
+- **Line boldness**: width and dash speed saturate at `5000 / line_boldness` W
+  with a maximum width of `6 + (line_boldness − 1) × 1.5` px — raise it if
+  your typical flows are small and the default reaction feels too subtle.
 - **Daily yield** replaces the static PV sub-label (`heute 12.4 kWh`) when
   configured.
 - **Unavailable sensors** render as `–` and their flows stay hidden — the card

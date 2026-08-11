@@ -31,14 +31,21 @@
  *                          include: [{entity_id: "sensor.*_pwr*"}]
  *                          exclude: [{state: "< 1"}]
  *   max_consumers:       optional; 1-6 segments in the column (default 4)
+ *   line_boldness:       optional; 1-5 (default 2) — how aggressively flow
+ *                        line thickness (and dash speed) react to power:
+ *                        max width 6+(b-1)*1.5 px, saturating at 5000/b W
+ *   flow_threshold:      optional; W below which a flow counts as idle
+ *                        (default 25; also gates the battery direction word)
+ *   pv_threshold:        optional; W below which the PV node dims (default 50)
  *   labels:              optional map to override labels, e.g.
  *     daily_yield: "today" / grid_import: "import"
+ *
+ * The battery ring doubles as the SOC gauge: full circle = 100 %, the arc
+ * drains counter-clockwise from 12 o'clock; the ring center shows the
+ * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.3.1";
-
-// Flows below this many watts count as "not flowing".
-const THRESHOLD = 25;
+const VERSION = "0.4.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -208,6 +215,15 @@ class CompactPowerFlowCard extends HTMLElement {
     this._config.max_consumers = Math.min(
       Math.max(Number.isFinite(config.max_consumers) ? config.max_consumers : 4, 1), 6
     );
+    this._config.line_boldness = Math.min(
+      Math.max(Number.isFinite(config.line_boldness) ? config.line_boldness : 2, 1), 5
+    );
+    this._config.flow_threshold =
+      Number.isFinite(config.flow_threshold) && config.flow_threshold >= 0
+        ? config.flow_threshold : 25;
+    this._config.pv_threshold =
+      Number.isFinite(config.pv_threshold) && config.pv_threshold >= 0
+        ? config.pv_threshold : 50;
     this._labels = { ...DEFAULT_LABELS, ...(config.labels || {}) };
     const f = config.filter || {};
     this._include = (f.include || []).map(compileRule);
@@ -297,7 +313,10 @@ class CompactPowerFlowCard extends HTMLElement {
       .map(
         ([k, n]) => `
         <g class="node" id="node-${k}" transform="translate(${n.cx},${n.cy})">
-          <circle class="ring ${k}" r="${n.r}"/>
+          ${k === "battery"
+            ? `<circle class="ring battery base" r="${n.r}"/>
+          <circle class="ring battery arc" id="soc-arc" r="${n.r}" pathLength="100" transform="rotate(-90)"/>`
+            : `<circle class="ring ${k}" r="${n.r}"/>`}
           <path class="icon" d="${ICONS[k]}" transform="translate(-9,-14) scale(0.75)"/>
           <text class="value" id="val-${k}" y="10" text-anchor="middle"></text>
           <text class="sub" id="sub-${k}" ${SUB_POS[k]}></text>
@@ -326,6 +345,11 @@ class CompactPowerFlowCard extends HTMLElement {
         .ring.grid { stroke: var(--energy-grid-consumption-color, #488fc2); }
         .ring.house { stroke: var(--primary-color, #03a9f4); }
         .ring.battery { stroke: var(--energy-battery-out-color, #4caf50); }
+        .ring.battery.base { stroke-opacity: .25; }
+        .ring.battery.arc { fill: none; stroke-linecap: round;
+                            transition: stroke-dasharray .3s, opacity .3s; }
+        .node .ring, .node .icon, .node .value { transition: opacity .3s; }
+        .node.idle .ring, .node.idle .icon, .node.idle .value { opacity: .3; }
         .icon { fill: none; stroke: var(--secondary-text-color, #727272);
                 stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
                 opacity: .8; transform-box: fill-box; }
@@ -409,21 +433,26 @@ class CompactPowerFlowCard extends HTMLElement {
 
   _update(consumers, dark) {
     const $ = (id) => this.shadowRoot.getElementById(id);
+    const thr = this._config.flow_threshold;
+    // boldness b: max width 6..12px, saturation power 5kW..1kW
+    const b = this._config.line_boldness;
+    const maxW = 6 + (b - 1) * 1.5;
+    const refP = 5000 / b;
     const flows = {};
     for (const f of FLOW_DEFS) {
       const w = this._num(f.key) || 0;
       flows[f.key] = w;
       const flowEl = $(`flow-${f.key}`);
       const railEl = $(`rail-${f.key}`);
-      if (w > THRESHOLD) {
-        // thickness ~ sqrt(power), 1.5px at the threshold up to 6px at >= 5 kW
-        const width = 1.5 + 4.5 * Math.sqrt(Math.min(1, w / 5000));
+      if (w > thr) {
+        // thickness ~ sqrt(power), 1.5px at the threshold up to maxW at refP
+        const width = 1.5 + (maxW - 1.5) * Math.sqrt(Math.min(1, w / refP));
         flowEl.classList.add("active");
         railEl.classList.add("active");
         flowEl.style.strokeWidth = width.toFixed(2);
         railEl.style.strokeWidth = width.toFixed(2);
-        // faster dashes for bigger flows: 4s at ~50 W down to 0.8s at >= 5 kW
-        const dur = Math.max(0.8, 4 - 3.2 * Math.min(1, w / 5000));
+        // faster dashes for bigger flows, saturating together with thickness
+        const dur = Math.max(0.8, 4 - 3.2 * Math.min(1, w / refP));
         flowEl.style.animationDuration = `${dur.toFixed(2)}s`;
       } else {
         flowEl.classList.remove("active");
@@ -447,11 +476,18 @@ class CompactPowerFlowCard extends HTMLElement {
       this._num("pv_to_grid") > gridNet
         ? this._labels.grid_export
         : this._labels.grid_import;
-    $("val-battery").textContent = soc === null ? "–" : `${Math.round(soc)} %`;
+    $("val-battery").textContent = this._fmtW(Math.abs(batNet));
     $("sub-battery").textContent =
-      Math.abs(batNet) > THRESHOLD
-        ? `${batNet > 0 ? this._labels.battery_charge : this._labels.battery_discharge} ${this._fmtW(Math.abs(batNet))}`
+      Math.abs(batNet) > thr
+        ? (batNet > 0 ? this._labels.battery_charge : this._labels.battery_discharge)
         : this._labels.battery;
+    const socArc = $("soc-arc");
+    const socPct = soc === null ? 0 : Math.min(100, Math.max(0, soc));
+    socArc.style.strokeDasharray = `${socPct.toFixed(1)} ${(100 - socPct).toFixed(1)}`;
+    // a zero-length dash with round caps would still paint a dot at 12 o'clock
+    socArc.style.opacity = socPct > 0 ? "1" : "0";
+
+    $("node-pv").classList.toggle("idle", (pv || 0) < this._config.pv_threshold);
 
     const yieldRaw = this._num("daily_yield");
     if (yieldRaw !== null) {
@@ -501,8 +537,14 @@ const EDITOR_LABELS = {
   filter_min: "Hide consumers below (W)",
   filter: "Consumer filter (advanced — too complex for the simple fields)",
   max_consumers: "Max consumers in the column",
+  line_boldness: "Line boldness (1 subtle … 5 aggressive)",
+  flow_threshold: "Hide flow lines below (W)",
+  pv_threshold: "Dim PV node below (W)",
   labels: "Label overrides (advanced)",
 };
+
+// Simple numeric options managed 1:1 between config and editor form.
+const NUMBER_KEYS = ["max_consumers", "line_boldness", "flow_threshold", "pv_threshold"];
 
 class CompactPowerFlowCardEditor extends HTMLElement {
   constructor() {
@@ -594,6 +636,9 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     }
     schema.push(
       { name: "max_consumers", selector: { number: { min: 1, max: 6, step: 1, mode: "box" } } },
+      { name: "line_boldness", selector: { number: { min: 1, max: 5, step: 0.5, mode: "box" } } },
+      { name: "flow_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
+      { name: "pv_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
       { name: "labels", selector: { object: {} } },
     );
 
@@ -606,7 +651,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     } else if (c.filter !== undefined) {
       data.filter = c.filter;
     }
-    if (c.max_consumers !== undefined) data.max_consumers = c.max_consumers;
+    for (const k of NUMBER_KEYS) if (c[k] !== undefined) data[k] = c[k];
     if (c.labels !== undefined) data.labels = c.labels;
 
     this._form.schema = schema;
@@ -635,8 +680,10 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     } else if (d.filter !== undefined) {
       cfg.filter = d.filter;
     }
-    if (d.max_consumers === undefined || d.max_consumers === "") delete cfg.max_consumers;
-    else cfg.max_consumers = d.max_consumers;
+    for (const k of NUMBER_KEYS) {
+      if (d[k] === undefined || d[k] === "") delete cfg[k];
+      else cfg[k] = d[k];
+    }
     if (d.labels === undefined || (d.labels && !Object.keys(d.labels).length)) delete cfg.labels;
     else cfg.labels = d.labels;
     this._config = cfg;
