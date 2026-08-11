@@ -90,13 +90,18 @@ power-pie-card. Without a `filter`, the column is absent.
 
 ### Labels
 
-All visible texts default to English; every label can be overridden — in YAML
-or via its own text field in the GUI editor. Set `show_labels: false` (a
-toggle in the editor) to hide all sub-labels — names, direction words, and the
-daily-yield line — for an icons-and-numbers-only card:
+All visible texts auto-localize from your Home Assistant user's language
+(`hass.language`) — supported out of the box: English, German, French,
+Italian, Spanish, Dutch, Portuguese, Norwegian, Danish, Finnish. Any other
+language falls back to English. Every label can still be overridden — in
+YAML or via its own text field in the GUI editor — on top of whichever
+language was detected. Set `show_labels: false` (a toggle in the editor) to
+hide all sub-labels — names, direction words, and the daily-yield line — for
+an icons-and-numbers-only card:
 
 ```yaml
-labels:            # example: German
+labels:            # optional per-key overrides, applied on top of the
+                   # auto-detected language (example forces German wording)
   pv: PV
   grid: Netz
   house: Haus

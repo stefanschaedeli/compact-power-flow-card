@@ -40,10 +40,13 @@
  *   show_labels:         optional; false hides all node sub-labels (names,
  *                        direction words, daily yield) for an icons+numbers
  *                        only look (default true)
- *   labels:              optional map overriding the English default labels
+ *   labels:              optional map overriding the auto-localized labels
  *                        (pv, grid, house, battery, grid_import, grid_export,
  *                        battery_charge, battery_discharge, daily_yield —
- *                        each editable individually in the GUI editor)
+ *                        each editable individually in the GUI editor).
+ *                        Labels auto-localize from hass.language, covering
+ *                        en/de/fr/it/es/nl/pt/no/da/fi (falls back to
+ *                        English otherwise); `labels` overrides win on top.
  *
  * The battery ring doubles as the SOC gauge: full circle = 100 %, the arc
  * drains counter-clockwise from 12 o'clock; the ring center shows the
@@ -111,19 +114,78 @@ const REQUIRED = [
   "house",
 ];
 
-// English defaults; every label is overridable via the `labels` config map
-// (each one is an individual text field in the GUI editor).
-const DEFAULT_LABELS = {
-  pv: "PV",
-  grid: "Grid",
-  house: "Home",
-  battery: "Battery",
-  grid_import: "import",
-  grid_export: "export",
-  battery_charge: "charging",
-  battery_discharge: "discharging",
-  daily_yield: "today",
+// Per-language label tables, auto-selected from hass.language. Every label
+// is still overridable via the `labels` config map (each one is an
+// individual text field in the GUI editor) on top of the detected language.
+const LABEL_TABLES = {
+  en: {
+    pv: "PV", grid: "Grid", house: "Home", battery: "Battery",
+    grid_import: "import", grid_export: "export",
+    battery_charge: "charging", battery_discharge: "discharging",
+    daily_yield: "today",
+  },
+  de: {
+    pv: "PV", grid: "Netz", house: "Haus", battery: "Batterie",
+    grid_import: "Bezug", grid_export: "Einspeisung",
+    battery_charge: "lädt", battery_discharge: "entlädt",
+    daily_yield: "heute",
+  },
+  fr: {
+    pv: "PV", grid: "Réseau", house: "Maison", battery: "Batterie",
+    grid_import: "import", grid_export: "export",
+    battery_charge: "charge", battery_discharge: "décharge",
+    daily_yield: "aujourd'hui",
+  },
+  it: {
+    pv: "FV", grid: "Rete", house: "Casa", battery: "Batteria",
+    grid_import: "prelievo", grid_export: "immissione",
+    battery_charge: "in carica", battery_discharge: "in scarica",
+    daily_yield: "oggi",
+  },
+  es: {
+    pv: "FV", grid: "Red", house: "Casa", battery: "Batería",
+    grid_import: "importación", grid_export: "exportación",
+    battery_charge: "cargando", battery_discharge: "descargando",
+    daily_yield: "hoy",
+  },
+  nl: {
+    pv: "PV", grid: "Net", house: "Huis", battery: "Batterij",
+    grid_import: "import", grid_export: "export",
+    battery_charge: "laden", battery_discharge: "ontladen",
+    daily_yield: "vandaag",
+  },
+  pt: {
+    pv: "FV", grid: "Rede", house: "Casa", battery: "Bateria",
+    grid_import: "importação", grid_export: "exportação",
+    battery_charge: "a carregar", battery_discharge: "a descarregar",
+    daily_yield: "hoje",
+  },
+  no: {
+    pv: "Sol", grid: "Nett", house: "Hjem", battery: "Batteri",
+    grid_import: "import", grid_export: "eksport",
+    battery_charge: "lader", battery_discharge: "lader ut",
+    daily_yield: "i dag",
+  },
+  da: {
+    pv: "Sol", grid: "Net", house: "Hjem", battery: "Batteri",
+    grid_import: "import", grid_export: "eksport",
+    battery_charge: "oplader", battery_discharge: "aflader",
+    daily_yield: "i dag",
+  },
+  fi: {
+    pv: "Aurinko", grid: "Verkko", house: "Koti", battery: "Akku",
+    grid_import: "osto", grid_export: "myynti",
+    battery_charge: "lataa", battery_discharge: "purkaa",
+    daily_yield: "tänään",
+  },
 };
+
+// hass.language is a BCP-47 tag (e.g. "de", "de-CH", "pt-BR"); match on the
+// primary subtag and fall back to English for unsupported languages.
+function resolveLanguage(hass) {
+  const primary = String((hass && hass.language) || "en").toLowerCase().split("-")[0];
+  return LABEL_TABLES[primary] ? primary : "en";
+}
 
 // --- filter helpers (ported verbatim from power-pie-card) ------------------
 
@@ -237,7 +299,8 @@ class CompactPowerFlowCard extends HTMLElement {
       Number.isFinite(config.pv_threshold) && config.pv_threshold >= 0
         ? config.pv_threshold : 50;
     this._config.show_labels = config.show_labels !== false;
-    this._labels = { ...DEFAULT_LABELS, ...(config.labels || {}) };
+    this._configLabels = config.labels || {};
+    this._labels = { ...LABEL_TABLES[this._lastLang || "en"], ...this._configLabels };
     const f = config.filter || {};
     this._include = (f.include || []).map(compileRule);
     this._exclude = (f.exclude || []).map(compileRule);
@@ -249,6 +312,11 @@ class CompactPowerFlowCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
+    const lang = resolveLanguage(hass);
+    if (lang !== this._lastLang) {
+      this._lastLang = lang;
+      this._labels = { ...LABEL_TABLES[lang], ...this._configLabels };
+    }
     const consumers = this._computeConsumers(hass);
     const dark = !!(hass.themes && hass.themes.darkMode);
     const snapshot =
@@ -256,7 +324,7 @@ class CompactPowerFlowCard extends HTMLElement {
         .map((id) => (hass.states[id] ? hass.states[id].state : "?"))
         .join("|") +
       "||" + consumers.map((c) => `${c.id}:${c.watts}`).join("|") +
-      `||dark:${dark}`;
+      `||dark:${dark}||lang:${lang}`;
     if (snapshot === this._lastStates && this._built) return;
     this._lastStates = snapshot;
     if (!this._built) this._build();
@@ -557,22 +625,25 @@ const EDITOR_LABELS = {
   flow_threshold: "Hide flow lines below (W)",
   pv_threshold: "Dim PV node below (W)",
   show_labels: "Show labels (names, direction words, daily yield)",
-  label_pv: `PV node label (default "${DEFAULT_LABELS.pv}")`,
-  label_grid: `Grid node label (default "${DEFAULT_LABELS.grid}")`,
-  label_house: `House node label (default "${DEFAULT_LABELS.house}")`,
-  label_battery: `Battery idle label (default "${DEFAULT_LABELS.battery}")`,
-  label_grid_import: `Grid import label (default "${DEFAULT_LABELS.grid_import}")`,
-  label_grid_export: `Grid export label (default "${DEFAULT_LABELS.grid_export}")`,
-  label_battery_charge: `Battery charging label (default "${DEFAULT_LABELS.battery_charge}")`,
-  label_battery_discharge: `Battery discharging label (default "${DEFAULT_LABELS.battery_discharge}")`,
-  label_daily_yield: `Daily yield prefix (default "${DEFAULT_LABELS.daily_yield}")`,
+};
+
+const LABEL_EDITOR_HINTS = {
+  pv: "PV node label",
+  grid: "Grid node label",
+  house: "House node label",
+  battery: "Battery idle label",
+  grid_import: "Grid import label",
+  grid_export: "Grid export label",
+  battery_charge: "Battery charging label",
+  battery_discharge: "Battery discharging label",
+  daily_yield: "Daily yield prefix",
 };
 
 // Simple numeric options managed 1:1 between config and editor form.
 const NUMBER_KEYS = ["max_consumers", "line_boldness", "flow_threshold", "pv_threshold"];
 
 // Label keys, each surfaced as its own text field (form name: label_<key>).
-const LABEL_KEYS = Object.keys(DEFAULT_LABELS);
+const LABEL_KEYS = Object.keys(LABEL_TABLES.en);
 
 class CompactPowerFlowCardEditor extends HTMLElement {
   constructor() {
@@ -589,7 +660,11 @@ class CompactPowerFlowCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    const lang = resolveLanguage(hass);
+    const langChanged = lang !== this._lang;
+    this._lang = lang;
     if (this._form) this._form.hass = hass;
+    if (langChanged && this._initialized) this._render();
   }
 
   // Simple-filter detection: at most one include rule using only entity_id
@@ -634,6 +709,16 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     await customElements.whenDefined("ha-form");
   }
 
+  _computeFieldLabel(name) {
+    if (name.startsWith("label_")) {
+      const key = name.slice("label_".length);
+      const lang = this._lang || "en";
+      const dflt = (LABEL_TABLES[lang] || LABEL_TABLES.en)[key];
+      return `${LABEL_EDITOR_HINTS[key] || key} (default "${dflt}")`;
+    }
+    return EDITOR_LABELS[name] || name;
+  }
+
   async _render() {
     if (!this._initialized) {
       this._initialized = true;
@@ -643,7 +728,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       this.shadowRoot.append(style, this._mount);
       await this._ensureHaForm();
       this._form = document.createElement("ha-form");
-      this._form.computeLabel = (s) => EDITOR_LABELS[s.name] || s.name;
+      this._form.computeLabel = (s) => this._computeFieldLabel(s.name);
       this._form.addEventListener("value-changed", (ev) => this._valueChanged(ev));
       this._mount.append(this._form);
     }
