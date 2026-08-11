@@ -47,7 +47,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -56,10 +56,10 @@ const PALETTE_DARK = ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e
 
 // Node geometry inside the 520x160 viewBox.
 const NODE = {
-  pv: { cx: 205, cy: 32, r: 26 },
-  grid: { cx: 46, cy: 80, r: 26 },
-  house: { cx: 362, cy: 80, r: 26 },
-  battery: { cx: 205, cy: 128, r: 26 },
+  pv: { cx: 205, cy: 32, r: 27 },
+  grid: { cx: 46, cy: 80, r: 27 },
+  house: { cx: 362, cy: 80, r: 27 },
+  battery: { cx: 205, cy: 128, r: 27 },
 };
 
 // Consumer column geometry (right of the house node).
@@ -89,7 +89,7 @@ const SUB_POS = {
   pv: 'y="38" text-anchor="middle"',
   grid: 'y="40" text-anchor="middle"',
   house: 'y="40" text-anchor="middle"',
-  battery: 'x="-34" y="4" text-anchor="end"',
+  battery: 'x="-35" y="4" text-anchor="end"',
 };
 
 const REQUIRED = [
@@ -281,8 +281,9 @@ class CompactPowerFlowCard extends HTMLElement {
 
   _fmtW(w) {
     if (w === null) return "–";
-    if (Math.abs(w) >= 1000) {
-      return `${(w / 1000).toFixed(w >= 10000 ? 1 : 2)} kW`;
+    // 999.5+ would round to "1000 W" — switch to kW before that happens.
+    if (Math.abs(w) >= 999.5) {
+      return `${(w / 1000).toFixed(Math.abs(w) >= 10000 ? 0 : 1)} kW`;
     }
     return `${Math.round(w)} W`;
   }
@@ -321,8 +322,8 @@ class CompactPowerFlowCard extends HTMLElement {
             ? `<circle class="ring battery base" r="${n.r}"/>
           <circle class="ring battery arc" id="soc-arc" r="${n.r}" pathLength="100" transform="rotate(-90)"/>`
             : `<circle class="ring ${k}" r="${n.r}"/>`}
-          <path class="icon" d="${ICONS[k]}" transform="translate(-9,-14) scale(0.75)"/>
-          <text class="value" id="val-${k}" y="10" text-anchor="middle"></text>
+          <path class="icon" d="${ICONS[k]}" transform="translate(-9,-17) scale(0.75)"/>
+          <text class="value" id="val-${k}" y="12" text-anchor="middle"></text>
           <text class="sub" id="sub-${k}" ${SUB_POS[k]}></text>
         </g>`
       )
