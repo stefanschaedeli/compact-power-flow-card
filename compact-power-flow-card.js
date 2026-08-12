@@ -55,7 +55,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -76,7 +76,7 @@ const COL = { x: 394, w: 24, top: 12, bottom: 148, gap: 1.5, minSeg: 14, rx: 2 }
 // The house node and the consumer column form one visual unit: a rounded
 // panel groups them. `pad` is the inner gutter the consumer values
 // right-align to.
-const GROUP = { x: 304, y: 6, w: 208, h: 148, rx: 12, pad: 12 };
+const GROUP = { x: 304, y: 6, w: 214, h: 148, rx: 12, pad: 10 };
 
 // Flow definitions; path d strings are generated from node coordinates.
 // Direction of travel = path direction.
