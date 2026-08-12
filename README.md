@@ -89,8 +89,11 @@ proportionally (biggest at the bottom, small segments keep a readable minimum
 height). Each segment is labeled with its friendly name and current power —
 names left-aligned, watt values right-aligned into a second column — and a
 subtle rounded panel groups the column together with the house node, since the
-two belong together. Long names are truncated to whatever room the widest
-value in the current set leaves free.
+two belong together. That panel takes ~55 % of the card width, with the
+generation side (grid, PV, battery) packed into the left ~45 %: consumer names
+are the content that actually needs room, so most real appliance names
+("Geschirrspüler", "Auto Ladestation") fit in full. Anything still too long is
+truncated to whatever room the widest value in the current set leaves free.
 Tapping a segment opens the standard more-info dialog. Filter rules use the
 same `entity_id` glob / `domain` / `state` comparison / `area` semantics as
 power-pie-card. Without a `filter`, the column is absent.

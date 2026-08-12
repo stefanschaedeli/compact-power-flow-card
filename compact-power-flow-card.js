@@ -58,19 +58,22 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.8.0";
+const VERSION = "0.9.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
 const PALETTE_LIGHT = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7", "#e34948"];
 const PALETTE_DARK = ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e66767"];
 
-// Node geometry inside the 520x160 viewBox.
+// Node geometry inside the 520x160 viewBox. The generation side (grid, pv,
+// battery) is packed into the left ~45% so the house + consumer panel can
+// take the rest: consumer names are the content that actually needs width.
 const NODE = {
-  pv: { cx: 205, cy: 32, r: 27 },
-  grid: { cx: 46, cy: 80, r: 27 },
-  house: { cx: 345, cy: 80, r: 27 },
-  battery: { cx: 205, cy: 128, r: 27 },
+  pv: { cx: 188, cy: 32, r: 27 },
+  grid: { cx: 42, cy: 80, r: 27 },
+  // centred in the panel's left region (17px clear either side of the ring)
+  house: { cx: 278, cy: 80, r: 27 },
+  battery: { cx: 188, cy: 128, r: 27 },
 };
 
 // Narrowest an active flow line ever draws (SVG units). The smallest flow on
@@ -82,13 +85,16 @@ const MIN_FLOW_W = 1.5;
 // own power warrants, so a lone small flow stays visibly small.
 const ABS_FULL_W = 6000;
 
-// Consumer column geometry (right of the house node).
-const COL = { x: 394, w: 24, top: 12, bottom: 148, gap: 1.5, minSeg: 14, rx: 2 };
+// Consumer column geometry (right of the house node). `w` is the bar itself
+// and is deliberately narrow — widening it would only steal room from the
+// names, which are what needs the space.
+const COL = { x: 322, w: 24, top: 12, bottom: 148, gap: 1.5, minSeg: 14, rx: 2 };
 
 // The house node and the consumer column form one visual unit: a rounded
 // panel groups them. `pad` is the inner gutter the consumer values
-// right-align to.
-const GROUP = { x: 304, y: 6, w: 214, h: 148, rx: 12, pad: 10 };
+// right-align to. Sized to ~55% of the card so consumer names get roughly
+// twice the room they had when the panel was 41%.
+const GROUP = { x: 234, y: 6, w: 284, h: 148, rx: 12, pad: 10 };
 
 // Flow definitions; path d strings are generated from node coordinates.
 // Direction of travel = path direction.
@@ -526,7 +532,7 @@ class CompactPowerFlowCard extends HTMLElement {
     const parts = [];
     // Name column starts right of the bar; values are flush to the group
     // panel's inner gutter so they form a right-aligned second column.
-    const nameX = COL.x + COL.w + 6;
+    const nameX = COL.x + COL.w + 8;
     const valX = GROUP.x + GROUP.w - GROUP.pad;
     // Reserve only what the widest value in THIS set actually needs (measured
     // ~5.2px/char at 9px/600 sans-serif), so short values leave the names more
