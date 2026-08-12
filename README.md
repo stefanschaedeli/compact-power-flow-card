@@ -5,7 +5,8 @@ and battery as ring nodes with animated flow paths, plus an optional stacked
 column of the top current power consumers. Tesla-style level of detail in
 roughly a quarter of the space.
 
-![light](docs/card-light.png) ![dark](docs/card-dark.png)
+![light](https://raw.githubusercontent.com/stefanschaedeli/compact-power-flow-card/main/docs/card-light.png)
+![dark](https://raw.githubusercontent.com/stefanschaedeli/compact-power-flow-card/main/docs/card-dark.png)
 
 ## Why another power flow card?
 
