@@ -58,7 +58,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.9.0";
+const VERSION = "0.9.1";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -69,11 +69,14 @@ const PALETTE_DARK = ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e
 // battery) is packed into the left ~45% so the house + consumer panel can
 // take the rest: consumer names are the content that actually needs width.
 const NODE = {
-  pv: { cx: 188, cy: 32, r: 27 },
+  // pv/battery sit at the exact midpoint between grid and house (64px of
+  // clear ring-to-ring gap on either side), so the generation side reads as
+  // one evenly spaced group rather than drifting toward the panel
+  pv: { cx: 160, cy: 32, r: 27 },
   grid: { cx: 42, cy: 80, r: 27 },
   // centred in the panel's left region (17px clear either side of the ring)
   house: { cx: 278, cy: 80, r: 27 },
-  battery: { cx: 188, cy: 128, r: 27 },
+  battery: { cx: 160, cy: 128, r: 27 },
 };
 
 // Narrowest an active flow line ever draws (SVG units). The smallest flow on
