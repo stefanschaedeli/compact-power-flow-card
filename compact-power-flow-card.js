@@ -55,7 +55,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.7.1";
+const VERSION = "0.7.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
