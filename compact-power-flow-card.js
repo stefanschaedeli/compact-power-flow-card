@@ -4,6 +4,8 @@
  * PV / grid / house / battery nodes with animated flow paths, plus an
  * optional stacked column of the top current power consumers (filtered
  * the same way as power-pie-card) and the daily yield at the PV node.
+ * The house node and that consumer column read as one unit: a rounded
+ * panel groups them, with consumer names left- and watts right-aligned.
  *
  * - Plain ES module: HTMLElement + Shadow DOM, no external libraries.
  * - No polling: re-renders only when a relevant entity changes.
@@ -53,7 +55,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.5.3";
+const VERSION = "0.7.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -64,12 +66,17 @@ const PALETTE_DARK = ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e
 const NODE = {
   pv: { cx: 205, cy: 32, r: 27 },
   grid: { cx: 46, cy: 80, r: 27 },
-  house: { cx: 362, cy: 80, r: 27 },
+  house: { cx: 345, cy: 80, r: 27 },
   battery: { cx: 205, cy: 128, r: 27 },
 };
 
 // Consumer column geometry (right of the house node).
 const COL = { x: 394, w: 24, top: 12, bottom: 148, gap: 1.5, minSeg: 14, rx: 2 };
+
+// The house node and the consumer column form one visual unit: a rounded
+// panel groups them. `pad` is the inner gutter the consumer values
+// right-align to.
+const GROUP = { x: 304, y: 6, w: 208, h: 148, rx: 12, pad: 12 };
 
 // Flow definitions; path d strings are generated from node coordinates.
 // Direction of travel = path direction.
@@ -411,6 +418,11 @@ class CompactPowerFlowCard extends HTMLElement {
         ha-card { height: 100%; display: flex; flex-direction: column;
                   justify-content: center; padding: 6px 12px; box-sizing: border-box; }
         svg { width: 100%; height: auto; display: block; }
+        /* Groups the house node and the consumer column into one unit.
+           Fill tracks the theme's text color so it reads the same in light
+           and dark without a second color definition. */
+        .group-panel { fill: var(--primary-text-color, #212121); fill-opacity: .04;
+                       stroke: none; }
         .rail { fill: none; stroke: var(--divider-color, rgba(120,120,120,.3));
                 stroke-width: 2; opacity: 0; transition: opacity .3s; }
         .rail.active { opacity: 1; }
@@ -448,6 +460,8 @@ class CompactPowerFlowCard extends HTMLElement {
         <svg viewBox="0 0 520 160" preserveAspectRatio="xMidYMid meet"
              class="${this._config.show_labels ? "" : "hide-labels"}"
              role="img" aria-label="Power flow">
+          <rect class="group-panel" x="${GROUP.x}" y="${GROUP.y}"
+                width="${GROUP.w}" height="${GROUP.h}" rx="${GROUP.rx}"/>
           ${flowPaths}
           ${nodes}
           <g id="consumers"></g>
@@ -496,20 +510,36 @@ class CompactPowerFlowCard extends HTMLElement {
       return;
     }
     const heights = this._segmentHeights(consumers);
+    const values = consumers.map((c) => this._fmtW(c.watts));
     const parts = [];
+    // Name column starts right of the bar; values are flush to the group
+    // panel's inner gutter so they form a right-aligned second column.
+    const nameX = COL.x + COL.w + 6;
+    const valX = GROUP.x + GROUP.w - GROUP.pad;
+    // Reserve only what the widest value in THIS set actually needs (measured
+    // ~5.2px/char at 9px/600 sans-serif), so short values leave the names more
+    // room instead of truncating against a fixed worst case.
+    const valW = Math.max(...values.map((v) => v.length)) * 5.2;
+    const nameBudget = valX - valW - 8 - nameX; // 8px min gap between columns
+    // 5.0px/char (above the 4.6 average) so wide glyphs — umlauts, caps —
+    // still clear the value column instead of crowding it.
+    const maxNameChars = Math.max(3, Math.floor(nameBudget / 5.0));
     let yBottom = COL.bottom;
     consumers.forEach((c, i) => {
       const h = heights[i];
       const top = yBottom - h;
       const cy = top + h / 2 + 3; // text baseline ≈ vertical center
-      const name = c.name.length > 11 ? `${c.name.slice(0, 10)}…` : c.name;
+      const name = c.name.length > maxNameChars
+        ? `${c.name.slice(0, maxNameChars - 1)}…`
+        : c.name;
       const color = palette[i % palette.length];
       parts.push(`
         <rect class="seg" data-entity="${c.id}" x="${COL.x}" y="${top.toFixed(1)}"
               width="${COL.w}" height="${h.toFixed(1)}" rx="${COL.rx}" fill="${color}"/>
-        <text data-entity="${c.id}" x="${COL.x + COL.w + 6}" y="${cy.toFixed(1)}"
-              text-anchor="start"><tspan class="seg-name" data-entity="${c.id}">${name}</tspan><tspan
-              class="seg-val" data-entity="${c.id}" dx="4">${this._fmtW(c.watts)}</tspan></text>`);
+        <text class="seg-name" data-entity="${c.id}" x="${nameX}" y="${cy.toFixed(1)}"
+              text-anchor="start">${name}</text>
+        <text class="seg-val" data-entity="${c.id}" x="${valX}" y="${cy.toFixed(1)}"
+              text-anchor="end">${values[i]}</text>`);
       yBottom = top - COL.gap;
     });
     g.innerHTML = parts.join("");
