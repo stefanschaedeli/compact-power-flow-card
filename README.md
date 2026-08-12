@@ -83,8 +83,12 @@ When a `filter` is configured, the right side of the card shows one vertical
 stacked column of the biggest current consumers: matching sensors are read in
 W/kW (by unit), sorted descending, and the top `max_consumers` are stacked
 proportionally (biggest at the bottom, small segments keep a readable minimum
-height). Each segment is labeled with its friendly name and current power;
-tapping a segment opens the standard more-info dialog. Filter rules use the
+height). Each segment is labeled with its friendly name and current power —
+names left-aligned, watt values right-aligned into a second column — and a
+subtle rounded panel groups the column together with the house node, since the
+two belong together. Long names are truncated to whatever room the widest
+value in the current set leaves free.
+Tapping a segment opens the standard more-info dialog. Filter rules use the
 same `entity_id` glob / `domain` / `state` comparison / `area` semantics as
 power-pie-card. Without a `filter`, the column is absent.
 
