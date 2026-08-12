@@ -20,8 +20,10 @@ roughly a quarter of the space.
   variables with sensible fallbacks; adapts to light/dark automatically.
 - **Lines only when power flows** — flows below `flow_threshold` (default
   25 W) are fully hidden, so an idle system shows just the nodes.
-- Flow **thickness and dash speed scale with power** (square-root scaled), with
-  a configurable `line_boldness` factor for how aggressively they react.
+- Flow **thickness and dash speed scale with power**, *relative to the biggest
+  flow currently running* — so the dominant flow is always obvious at a glance,
+  whether your system is pushing 11 kW or 300 W. A configurable
+  `line_boldness` factor sets the maximum width.
 - **Battery ring = SOC gauge** — the arc drains counter-clockwise as the
   battery empties; the center shows charge/discharge power.
 - **Top-consumers column** — auto-discovers your biggest current loads via an
@@ -72,8 +74,8 @@ filter:                                      # optional: enables the consumers c
   exclude:
     - state: "< 1"
 max_consumers: 4                             # optional, 1-6 segments (default 4)
-line_boldness: 2                             # optional, 1-5 (default 2): how hard
-                                             #   line width/speed react to power
+line_boldness: 2                             # optional, 1-5 (default 2): max width
+                                             #   of the biggest current flow
 flow_threshold: 25                           # optional, W: flows below are hidden
 pv_threshold: 50                             # optional, W: PV node dims below
 ```
@@ -129,9 +131,15 @@ labels:            # optional per-key overrides, applied on top of the
   (`lädt`/`entlädt`). No percentage is displayed.
 - **PV node** dims to 30 % opacity below `pv_threshold` (default 50 W); the
   daily-yield line stays fully readable.
-- **Line boldness**: width and dash speed saturate at `5000 / line_boldness` W
-  with a maximum width of `6 + (line_boldness − 1) × 1.5` px — raise it if
-  your typical flows are small and the default reaction feels too subtle.
+- **Line thickness is relative, not absolute.** The biggest flow on screen
+  right now draws at full width (`6 + (line_boldness − 1) × 1.5` px) and the
+  others scale against it on a square-root curve, so the split between flows
+  stays readable across the whole range a PV system produces. A fixed W→px
+  scale cannot do this: tuned for an 11 kW midday export it renders every
+  night-time flow as a hairline, and tuned for night it clips everything above
+  a couple of kW to the same width.
+- An absolute cap applies on top, so a *lone* small flow still renders small
+  rather than filling the full width just for being the only one active.
 - **Daily yield** replaces the static PV sub-label (`heute 12.4 kWh`) when
   configured.
 - **Unavailable sensors** render as `–` and their flows stay hidden — the card

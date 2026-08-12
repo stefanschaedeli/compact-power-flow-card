@@ -9,7 +9,8 @@
  *
  * - Plain ES module: HTMLElement + Shadow DOM, no external libraries.
  * - No polling: re-renders only when a relevant entity changes.
- * - CSS/SVG animations only; flow speed AND line thickness scale with power.
+ * - CSS/SVG animations only; flow speed AND line thickness scale with power,
+ *   relative to the largest flow currently running.
  * - Lines are only visible while power is actually flowing.
  * - Theme-aware (uses HA energy/theme CSS variables with sane fallbacks).
  * - GUI-editable (ha-form based card editor).
@@ -33,9 +34,11 @@
  *                          include: [{entity_id: "sensor.*_pwr*"}]
  *                          exclude: [{state: "< 1"}]
  *   max_consumers:       optional; 1-6 segments in the column (default 4)
- *   line_boldness:       optional; 1-5 (default 2) — how aggressively flow
- *                        line thickness (and dash speed) react to power:
- *                        max width 6+(b-1)*1.5 px, saturating at 5000/b W
+ *   line_boldness:       optional; 1-5 (default 2) — max flow-line width,
+ *                        6+(b-1)*1.5 px. Thickness is RELATIVE: the biggest
+ *                        flow on screen draws at that width and the rest
+ *                        scale against it (sqrt curve), capped by absolute
+ *                        power so a lone small flow still renders small
  *   flow_threshold:      optional; W below which a flow counts as idle
  *                        (default 25; also gates the battery direction word)
  *   pv_threshold:        optional; W below which the PV node dims (default 50)
@@ -55,7 +58,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -69,6 +72,15 @@ const NODE = {
   house: { cx: 345, cy: 80, r: 27 },
   battery: { cx: 205, cy: 128, r: 27 },
 };
+
+// Narrowest an active flow line ever draws (SVG units). The smallest flow on
+// screen still has to read as a line, not a hairline.
+const MIN_FLOW_W = 1.5;
+
+// Power at which a flow may draw at full width on absolute grounds alone.
+// Only caps the relative scale downward: a flow never draws fatter than its
+// own power warrants, so a lone small flow stays visibly small.
+const ABS_FULL_W = 6000;
 
 // Consumer column geometry (right of the house node).
 const COL = { x: 394, w: 24, top: 12, bottom: 148, gap: 1.5, minSeg: 14, rx: 2 };
@@ -548,25 +560,36 @@ class CompactPowerFlowCard extends HTMLElement {
   _update(consumers, dark) {
     const $ = (id) => this.shadowRoot.getElementById(id);
     const thr = this._config.flow_threshold;
-    // boldness b: max width 6..12px, saturation power 5kW..1kW
+    // Line thickness is RELATIVE: the biggest flow right now always draws at
+    // full width and everything else scales against it. A fixed W->px scale
+    // cannot work here — a system exporting 11 kW at noon and importing
+    // 300 W at night would either clip the whole top of its range or render
+    // every night-time flow as a hairline.
     const b = this._config.line_boldness;
     const maxW = 6 + (b - 1) * 1.5;
-    const refP = 5000 / b;
     const flows = {};
+    for (const f of FLOW_DEFS) flows[f.key] = this._num(f.key) || 0;
+    const active = FLOW_DEFS.filter((f) => flows[f.key] > thr);
+    const peak = active.reduce((m, f) => Math.max(m, flows[f.key]), 0);
     for (const f of FLOW_DEFS) {
-      const w = this._num(f.key) || 0;
-      flows[f.key] = w;
+      const w = flows[f.key];
       const flowEl = $(`flow-${f.key}`);
       const railEl = $(`rail-${f.key}`);
       if (w > thr) {
-        // thickness ~ sqrt(power), 1.5px at the threshold up to maxW at refP
-        const width = 1.5 + (maxW - 1.5) * Math.sqrt(Math.min(1, w / refP));
+        // share of the current peak, on a sqrt curve so a flow at a third of
+        // the peak still reads as clearly present rather than near-invisible
+        const share = Math.sqrt(w / peak);
+        // Relative scaling alone would draw a lone 200 W trickle exactly as
+        // fat as a lone 9 kW export, since each is its own peak. Cap the
+        // width by absolute power too, so "thick" keeps some real meaning.
+        const absCap = MIN_FLOW_W + (maxW - MIN_FLOW_W) * Math.min(1, w / ABS_FULL_W);
+        const width = Math.min(MIN_FLOW_W + (maxW - MIN_FLOW_W) * share, absCap);
         flowEl.classList.add("active");
         railEl.classList.add("active");
         flowEl.style.strokeWidth = width.toFixed(2);
         railEl.style.strokeWidth = width.toFixed(2);
-        // faster dashes for bigger flows, saturating together with thickness
-        const dur = Math.max(0.8, 4 - 3.2 * Math.min(1, w / refP));
+        // dash speed follows the same relative share as the thickness
+        const dur = Math.max(0.8, 4 - 3.2 * share);
         flowEl.style.animationDuration = `${dur.toFixed(2)}s`;
       } else {
         flowEl.classList.remove("active");
@@ -651,7 +674,7 @@ const EDITOR_LABELS = {
   filter_min: "Hide consumers below (W)",
   filter: "Consumer filter (advanced — too complex for the simple fields)",
   max_consumers: "Max consumers in the column",
-  line_boldness: "Line boldness (1 subtle … 5 aggressive)",
+  line_boldness: "Line boldness (max width of the biggest flow)",
   flow_threshold: "Hide flow lines below (W)",
   pv_threshold: "Dim PV node below (W)",
   show_labels: "Show labels (names, direction words, daily yield)",
