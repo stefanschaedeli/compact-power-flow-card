@@ -78,6 +78,9 @@ line_boldness: 2                             # optional, 1-5 (default 2): max wi
                                              #   of the biggest current flow
 flow_threshold: 25                           # optional, W: flows below are hidden
 pv_threshold: 50                             # optional, W: PV node dims below
+uniform_color: "#8a8a8a"                     # optional: one CSS color for ALL
+                                             #   node rings + flow lines
+                                             #   (unset = per-node theme colors)
 ```
 
 ### Top-consumers column
@@ -145,6 +148,10 @@ labels:            # optional per-key overrides, applied on top of the
   rather than filling the full width just for being the only one active.
 - **Daily yield** replaces the static PV sub-label (`heute 12.4 kWh`) when
   configured.
+- **`uniform_color`** accepts any CSS color — hex, `rgb(...)`, or a theme
+  variable like `var(--primary-color)` — and recolors all four node rings
+  (including the battery SOC arc and its faint track) and all flow lines.
+  The top-consumers column keeps its own palette either way.
 - **Unavailable sensors** render as `–` and their flows stay hidden — the card
   never throws on missing states.
 - Sizing in sections views: defaults to 12 columns × 3 rows

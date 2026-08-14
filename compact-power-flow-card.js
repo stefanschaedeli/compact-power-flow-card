@@ -45,6 +45,10 @@
  *   show_labels:         optional; false hides all node sub-labels (names,
  *                        direction words, daily yield) for an icons+numbers
  *                        only look (default true)
+ *   uniform_color:       optional; one CSS color (hex, rgb(), var(--...))
+ *                        applied to ALL node rings and flow lines instead of
+ *                        the per-node theme colors. Unset = default colors.
+ *                        The consumer column keeps its own palette.
  *   labels:              optional map overriding the auto-localized labels
  *                        (pv, grid, house, battery, grid_import, grid_export,
  *                        battery_charge, battery_discharge, daily_yield —
@@ -58,7 +62,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.9.1";
+const VERSION = "0.10.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -327,6 +331,9 @@ class CompactPowerFlowCard extends HTMLElement {
       Number.isFinite(config.pv_threshold) && config.pv_threshold >= 0
         ? config.pv_threshold : 50;
     this._config.show_labels = config.show_labels !== false;
+    this._config.uniform_color =
+      typeof config.uniform_color === "string" && config.uniform_color.trim()
+        ? config.uniform_color.trim() : null;
     this._configLabels = config.labels || {};
     this._labels = { ...LABEL_TABLES[this._lastLang || "en"], ...this._configLabels };
     const f = config.filter || {};
@@ -451,15 +458,24 @@ class CompactPowerFlowCard extends HTMLElement {
                 stroke-dasharray: 5 11; opacity: 0; transition: opacity .3s; }
         .flow.active { opacity: 1; animation: dash linear infinite; }
         @keyframes dash { to { stroke-dashoffset: -16; } }
-        .flow.solar { stroke: var(--energy-solar-color, #ff9800); }
-        .flow.grid { stroke: var(--energy-grid-consumption-color, #488fc2); }
-        .flow.battery { stroke: var(--energy-battery-out-color, #4caf50); }
+        :host { --cpfc-solar: var(--energy-solar-color, #ff9800);
+                --cpfc-grid: var(--energy-grid-consumption-color, #488fc2);
+                --cpfc-house: var(--primary-color, #03a9f4);
+                --cpfc-battery: var(--energy-battery-out-color, #4caf50); }
+        ${this._config.uniform_color ? `:host {
+                --cpfc-solar: ${this._config.uniform_color};
+                --cpfc-grid: ${this._config.uniform_color};
+                --cpfc-house: ${this._config.uniform_color};
+                --cpfc-battery: ${this._config.uniform_color}; }` : ""}
+        .flow.solar { stroke: var(--cpfc-solar); }
+        .flow.grid { stroke: var(--cpfc-grid); }
+        .flow.battery { stroke: var(--cpfc-battery); }
         .ring { fill: var(--card-background-color, none);
                 stroke-width: 2.5; }
-        .ring.pv { stroke: var(--energy-solar-color, #ff9800); }
-        .ring.grid { stroke: var(--energy-grid-consumption-color, #488fc2); }
-        .ring.house { stroke: var(--primary-color, #03a9f4); }
-        .ring.battery { stroke: var(--energy-battery-out-color, #4caf50); }
+        .ring.pv { stroke: var(--cpfc-solar); }
+        .ring.grid { stroke: var(--cpfc-grid); }
+        .ring.house { stroke: var(--cpfc-house); }
+        .ring.battery { stroke: var(--cpfc-battery); }
         .ring.battery.base { stroke-opacity: .25; }
         .ring.battery.arc { fill: none; stroke-linecap: round;
                             transition: stroke-dasharray .3s, opacity .3s; }
@@ -687,6 +703,7 @@ const EDITOR_LABELS = {
   flow_threshold: "Hide flow lines below (W)",
   pv_threshold: "Dim PV node below (W)",
   show_labels: "Show labels (names, direction words, daily yield)",
+  uniform_color: "Uniform color for nodes + flow lines (any CSS color; empty = default colors)",
 };
 
 const LABEL_EDITOR_HINTS = {
@@ -815,6 +832,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       { name: "flow_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
       { name: "pv_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
       { name: "show_labels", selector: { boolean: {} } },
+      { name: "uniform_color", selector: { text: {} } },
       ...LABEL_KEYS.map((k) => ({ name: `label_${k}`, selector: { text: {} } })),
     );
 
@@ -829,6 +847,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     }
     for (const k of NUMBER_KEYS) if (c[k] !== undefined) data[k] = c[k];
     data.show_labels = c.show_labels !== false;
+    if (c.uniform_color !== undefined) data.uniform_color = c.uniform_color;
     const labels = c.labels || {};
     for (const k of LABEL_KEYS) if (labels[k] !== undefined) data[`label_${k}`] = labels[k];
 
@@ -864,6 +883,11 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     }
     if (d.show_labels === false) cfg.show_labels = false;
     else delete cfg.show_labels;
+    if (typeof d.uniform_color === "string" && d.uniform_color.trim()) {
+      cfg.uniform_color = d.uniform_color.trim();
+    } else {
+      delete cfg.uniform_color;
+    }
     const labels = {};
     for (const k of LABEL_KEYS) {
       const v = d[`label_${k}`];
