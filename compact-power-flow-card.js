@@ -62,7 +62,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.10.0";
+const VERSION = "0.11.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -253,12 +253,17 @@ function parseStateMatcher(spec) {
 
 function compileRule(rule) {
   const tests = [];
+  const idTests = []; // hass-independent tests, usable for candidate prefiltering
   if (rule.entity_id) {
     const re = globToRegExp(String(rule.entity_id));
-    tests.push((id) => re.test(id));
+    const t = (id) => re.test(id);
+    tests.push(t);
+    idTests.push(t);
   }
   if (rule.domain) {
-    tests.push((id) => id.split(".")[0] === rule.domain);
+    const t = (id) => id.split(".")[0] === rule.domain;
+    tests.push(t);
+    idTests.push(t);
   }
   if (rule.state !== undefined) {
     const match = parseStateMatcher(rule.state);
@@ -282,7 +287,11 @@ function compileRule(rule) {
       return !!area && String(area.name).toLowerCase() === want;
     });
   }
-  return (id, hass) => tests.every((t) => t(id, hass));
+  const fn = (id, hass) => tests.every((t) => t(id, hass));
+  // True when the id could ever match: only the hass-independent tests are
+  // applied. Rules without any id-only test keep every id as a candidate.
+  fn.idOnly = (id) => idTests.every((t) => t(id));
+  return fn;
 }
 
 // Convert a state object's numeric value to watts using its unit.
@@ -339,9 +348,28 @@ class CompactPowerFlowCard extends HTMLElement {
     const f = config.filter || {};
     this._include = (f.include || []).map(compileRule);
     this._exclude = (f.exclude || []).map(compileRule);
+    this._candidateIds = null;
+    this._candidateCount = -1;
     this._lastStates = null;
     if (this.shadowRoot) this.shadowRoot.innerHTML = "";
     this._built = false;
+  }
+
+  // Pause the dash animation while the page is hidden (background tab,
+  // locked screen) — the compositor otherwise keeps animating unseen lines.
+  connectedCallback() {
+    if (!this._onVisibility) {
+      this._onVisibility = () =>
+        this.classList.toggle("cpfc-hidden", document.hidden);
+    }
+    document.addEventListener("visibilitychange", this._onVisibility);
+    this._onVisibility();
+  }
+
+  disconnectedCallback() {
+    if (this._onVisibility) {
+      document.removeEventListener("visibilitychange", this._onVisibility);
+    }
   }
 
   set hass(hass) {
@@ -367,10 +395,22 @@ class CompactPowerFlowCard extends HTMLElement {
   }
 
   // Top current consumers via the include/exclude filter, sorted descending.
+  // The full-instance entity sweep runs only when the entity-id universe
+  // changes; every hass update after that touches just the candidate ids
+  // (the ones whose hass-independent include tests pass), so a busy
+  // instance no longer pays a per-update scan over thousands of entities.
   _computeConsumers(hass) {
     if (!this._include.length) return [];
+    const allIds = Object.keys(hass.states);
+    if (!this._candidateIds || allIds.length !== this._candidateCount) {
+      this._candidateCount = allIds.length;
+      this._candidateIds = allIds.filter((id) =>
+        this._include.some((rule) => rule.idOnly(id))
+      );
+    }
     const items = [];
-    for (const id of Object.keys(hass.states)) {
+    for (const id of this._candidateIds) {
+      if (!hass.states[id]) continue;
       if (!this._include.some((rule) => rule(id, hass))) continue;
       if (this._exclude.some((rule) => rule(id, hass))) continue;
       const st = hass.states[id];
@@ -458,6 +498,12 @@ class CompactPowerFlowCard extends HTMLElement {
                 stroke-dasharray: 5 11; opacity: 0; transition: opacity .3s; }
         .flow.active { opacity: 1; animation: dash linear infinite; }
         @keyframes dash { to { stroke-dashoffset: -16; } }
+        /* Idle tabs and reduced-motion users get static lines; the flows
+           stay visible, only the marching dashes stop. */
+        :host(.cpfc-hidden) .flow.active { animation-play-state: paused; }
+        @media (prefers-reduced-motion: reduce) {
+          .flow.active { animation: none; }
+        }
         :host { --cpfc-solar: var(--energy-solar-color, #ff9800);
                 --cpfc-grid: var(--energy-grid-consumption-color, #488fc2);
                 --cpfc-house: var(--primary-color, #03a9f4);
