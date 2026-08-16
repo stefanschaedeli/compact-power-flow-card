@@ -1,9 +1,10 @@
 # Compact Power Flow Card
 
 A compact, dependency-free power-flow card for Home Assistant: PV, grid, house
-and battery as ring nodes with animated flow paths, plus an optional stacked
-column of the top current power consumers. Tesla-style level of detail in
-roughly a quarter of the space.
+and battery as ring nodes with static flow lines (thickness ∝ power, a small
+arrow marking the direction), plus an optional stacked column of the top
+current power consumers. Tesla-style level of detail in roughly a quarter of
+the space — without the always-on animation cost.
 
 ![light](https://raw.githubusercontent.com/stefanschaedeli/compact-power-flow-card/main/docs/card-light.png)
 ![dark](https://raw.githubusercontent.com/stefanschaedeli/compact-power-flow-card/main/docs/card-dark.png)
@@ -14,14 +15,17 @@ roughly a quarter of the space.
   gracefully down to phone width (390 px).
 - **Zero dependencies** — one plain ES module (HTMLElement + Shadow DOM). No
   Lit bundle, no chart library.
-- **Efficient** — no polling, no timers: the card re-renders only when a
-  relevant entity actually changes state. Flow animation is pure CSS.
+- **Efficient, kiosk-friendly** — no animation at all: flows are static lines
+  with a direction arrow, so an idle dashboard paints *nothing* (a wall tablet
+  stays cool). State updates are coalesced onto a 2 s tick and the card only
+  touches the DOM when a **displayed** value changes — sensor jitter below
+  display resolution is ignored. Flow-line styling updates at most every 5 s.
 - **Theme-aware** — uses HA's `--energy-*-color` and text/background theme
   variables with sensible fallbacks; adapts to light/dark automatically.
 - **Lines only when power flows** — flows below `flow_threshold` (default
   25 W) are fully hidden, so an idle system shows just the nodes.
-- Flow **thickness and dash speed scale with power**, *relative to the biggest
-  flow currently running* — so the dominant flow is always obvious at a glance,
+- Flow **thickness scales with power**, *relative to the biggest flow
+  currently running* — so the dominant flow is always obvious at a glance,
   whether your system is pushing 11 kW or 300 W. A configurable
   `line_boldness` factor sets the maximum width.
 - **Battery ring = SOC gauge** — the arc drains counter-clockwise as the

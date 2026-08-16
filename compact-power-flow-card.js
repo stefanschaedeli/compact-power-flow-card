@@ -8,10 +8,14 @@
  * panel groups them, with consumer names left- and watts right-aligned.
  *
  * - Plain ES module: HTMLElement + Shadow DOM, no external libraries.
- * - No polling: re-renders only when a relevant entity changes.
- * - CSS/SVG animations only; flow speed AND line thickness scale with power,
- *   relative to the largest flow currently running.
- * - Lines are only visible while power is actually flowing.
+ * - No polling loops: hass updates coalesce onto a 2 s render tick, and the
+ *   card only touches the DOM when a DISPLAYED value actually changes —
+ *   sensor jitter below display resolution causes zero work.
+ * - No animation (kiosk-friendly): each flow is a static line with a small
+ *   direction arrow at its midpoint. Line thickness scales with power,
+ *   relative to the largest flow currently running; flow styling (thickness,
+ *   active set) updates at most every 5 s. Lines are only visible while
+ *   power is actually flowing.
  * - Theme-aware (uses HA energy/theme CSS variables with sane fallbacks).
  * - GUI-editable (ha-form based card editor).
  *
@@ -67,7 +71,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.12.0";
+const VERSION = "0.13.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -91,6 +95,13 @@ const NODE = {
 // Narrowest an active flow line ever draws (SVG units). The smallest flow on
 // screen still has to read as a line, not a hairline.
 const MIN_FLOW_W = 1.5;
+
+// Render cadence. hass pushes a new state object for every state change
+// anywhere in the instance; the card coalesces them onto one trailing tick.
+// Text/consumer updates land at most every RENDER_INTERVAL, flow-line styling
+// (thickness, active set, arrows) at most every FLOW_INTERVAL.
+const RENDER_INTERVAL = 2000;
+const FLOW_INTERVAL = 5000;
 
 // Power at which a flow may draw at full width on absolute grounds alone.
 // Only caps the relative scale downward: a flow never draws fatter than its
@@ -356,48 +367,79 @@ class CompactPowerFlowCard extends HTMLElement {
     this._exclude = (f.exclude || []).map(compileRule);
     this._candidateIds = null;
     this._candidateCount = -1;
-    this._lastStates = null;
+    this._lastTextKey = null;
+    this._lastFlowKey = null;
+    this._lastFlowApply = 0;
     if (this.shadowRoot) this.shadowRoot.innerHTML = "";
     this._built = false;
+    if (this._hass) this._scheduleRender();
   }
 
-  // Pause the dash animation while the page is hidden (background tab,
-  // locked screen) — the compositor otherwise keeps animating unseen lines.
   connectedCallback() {
-    if (!this._onVisibility) {
-      this._onVisibility = () =>
-        this.classList.toggle("cpfc-hidden", document.hidden);
-    }
-    document.addEventListener("visibilitychange", this._onVisibility);
-    this._onVisibility();
+    if (this._hass && this._config) this._scheduleRender();
   }
 
   disconnectedCallback() {
-    if (this._onVisibility) {
-      document.removeEventListener("visibilitychange", this._onVisibility);
+    if (this._renderTimer) {
+      clearTimeout(this._renderTimer);
+      this._renderTimer = null;
     }
   }
 
+  // Storing the hass reference is all that happens synchronously; the actual
+  // render is coalesced onto a trailing RENDER_INTERVAL tick. The timer is
+  // only armed while an update is pending — nothing runs when the instance
+  // is quiet.
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
+    this._scheduleRender();
+  }
+
+  _scheduleRender(delay) {
+    if (this._renderTimer) return;
+    const wait = delay !== undefined
+      ? delay
+      : Math.max(0, (this._lastRender || 0) + RENDER_INTERVAL - Date.now());
+    this._renderTimer = setTimeout(() => {
+      this._renderTimer = null;
+      this._lastRender = Date.now();
+      this._render();
+    }, wait);
+  }
+
+  _render() {
+    const hass = this._hass;
+    if (!hass || !this._config) return;
     const lang = resolveLanguage(hass);
     if (lang !== this._lastLang) {
       this._lastLang = lang;
       this._labels = { ...LABEL_TABLES[lang], ...this._configLabels };
+      this._lastTextKey = null; // labels changed → force a text repaint
     }
-    const consumers = this._computeConsumers(hass);
-    const dark = !!(hass.themes && hass.themes.darkMode);
-    const snapshot =
-      Object.values(this._config.entities)
-        .map((id) => (hass.states[id] ? hass.states[id].state : "?"))
-        .join("|") +
-      "||" + consumers.map((c) => `${c.id}:${c.watts}`).join("|") +
-      `||dark:${dark}||lang:${lang}`;
-    if (snapshot === this._lastStates && this._built) return;
-    this._lastStates = snapshot;
     if (!this._built) this._build();
-    this._update(consumers, dark);
+    const model = this._computeModel(hass);
+    const textKey = JSON.stringify([
+      model.values, model.subs, model.socDash, model.socVisible,
+      model.pvIdle, model.consumers, model.dark,
+    ]);
+    if (textKey !== this._lastTextKey) {
+      this._lastTextKey = textKey;
+      this._applyText(model);
+    }
+    const flowKey = JSON.stringify(model.flows);
+    if (flowKey !== this._lastFlowKey) {
+      const now = Date.now();
+      if (now - this._lastFlowApply >= FLOW_INTERVAL) {
+        this._lastFlowKey = flowKey;
+        this._lastFlowApply = now;
+        this._applyFlows(model.flows);
+      } else {
+        // flow change is rate-limited right now — pick it up when due even
+        // if no further hass update arrives in the meantime
+        this._scheduleRender(this._lastFlowApply + FLOW_INTERVAL - now);
+      }
+    }
   }
 
   // Top current consumers via the include/exclude filter, sorted descending.
@@ -459,7 +501,10 @@ class CompactPowerFlowCard extends HTMLElement {
     const y1 = a.cy + uy * (a.r + (f.fromGap || 4));
     const x2 = b.cx - ux * (b.r + 4);
     const y2 = b.cy - uy * (b.r + 4);
-    return `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+    // explicit midpoint vertex so marker-mid can hang the direction arrow on it
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    return `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${mx.toFixed(1)} ${my.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
   }
 
   _build() {
@@ -469,8 +514,21 @@ class CompactPowerFlowCard extends HTMLElement {
         const d = this._flowPath(f);
         return `
         <path id="rail-${f.key}" class="rail" d="${d}"/>
-        <path id="flow-${f.key}" class="flow ${f.color}" d="${d}"/>`;
+        <path id="flow-${f.key}" class="flow ${f.color}" d="${d}"
+              marker-mid="url(#arr-${f.color})"/>`;
       })
+      .join("");
+    // Direction arrows: one filled triangle per flow color, hung on the
+    // path's midpoint vertex via marker-mid. Fixed user-space size (not
+    // strokeWidth units) so thin trickles still get a readable arrow; the
+    // card-background outline keeps it visible on top of a same-colored
+    // line at full width.
+    const markers = ["solar", "grid", "battery"]
+      .map((c) => `
+        <marker id="arr-${c}" markerUnits="userSpaceOnUse" markerWidth="9"
+                markerHeight="9" refX="4.5" refY="4.5" orient="auto">
+          <path class="arrow ${c}" d="M 1 1 L 8 4.5 L 1 8 Z"/>
+        </marker>`)
       .join("");
     const nodes = Object.entries(NODE)
       .map(
@@ -501,15 +559,13 @@ class CompactPowerFlowCard extends HTMLElement {
                 stroke-width: 2; opacity: 0; transition: opacity .3s; }
         .rail.active { opacity: 1; }
         .flow { fill: none; stroke-width: 3; stroke-linecap: round;
-                stroke-dasharray: 5 11; opacity: 0; transition: opacity .3s; }
-        .flow.active { opacity: 1; animation: dash linear infinite; }
-        @keyframes dash { to { stroke-dashoffset: -16; } }
-        /* Idle tabs and reduced-motion users get static lines; the flows
-           stay visible, only the marching dashes stop. */
-        :host(.cpfc-hidden) .flow.active { animation-play-state: paused; }
-        @media (prefers-reduced-motion: reduce) {
-          .flow.active { animation: none; }
-        }
+                opacity: 0; transition: opacity .3s; }
+        .flow.active { opacity: 1; }
+        .arrow { stroke: var(--card-background-color, #fff); stroke-width: 1;
+                 stroke-linejoin: round; }
+        .arrow.solar { fill: var(--cpfc-solar); }
+        .arrow.grid { fill: var(--cpfc-grid); }
+        .arrow.battery { fill: var(--cpfc-battery); }
         :host { --cpfc-solar: var(--energy-solar-color, #ff9800);
                 --cpfc-grid: var(--energy-grid-consumption-color, #488fc2);
                 --cpfc-house: var(--primary-color, #03a9f4);
@@ -549,6 +605,7 @@ class CompactPowerFlowCard extends HTMLElement {
         <svg viewBox="0 0 520 160" preserveAspectRatio="xMidYMid meet"
              class="${this._config.show_labels ? "" : "hide-labels"}"
              role="img" aria-label="Power flow">
+          <defs>${markers}</defs>
           <rect class="group-panel" x="${GROUP.x}" y="${GROUP.y}"
                 width="${GROUP.w}" height="${GROUP.h}" rx="${GROUP.rx}"/>
           ${flowPaths}
@@ -600,8 +657,8 @@ class CompactPowerFlowCard extends HTMLElement {
     }
     const uniformBar =
       this._config.uniform_bars ? this._config.uniform_color : null;
-    const heights = this._segmentHeights(consumers);
-    const values = consumers.map((c) => this._fmtW(c.watts));
+    const heights = consumers.map((c) => c.h);
+    const values = consumers.map((c) => c.value);
     const parts = [];
     // Name column starts right of the bar; values are flush to the group
     // panel's inner gutter so they form a right-aligned second column.
@@ -636,8 +693,10 @@ class CompactPowerFlowCard extends HTMLElement {
     g.innerHTML = parts.join("");
   }
 
-  _update(consumers, dark) {
-    const $ = (id) => this.shadowRoot.getElementById(id);
+  // Everything the DOM needs, quantized to DISPLAYED precision: two hass
+  // updates that format to the same output produce byte-identical models,
+  // so sensor jitter below display resolution causes zero DOM work.
+  _computeModel(hass) {
     const thr = this._config.flow_threshold;
     // Line thickness is RELATIVE: the biggest flow right now always draws at
     // full width and everything else scales against it. A fixed W->px scale
@@ -646,14 +705,13 @@ class CompactPowerFlowCard extends HTMLElement {
     // every night-time flow as a hairline.
     const b = this._config.line_boldness;
     const maxW = 6 + (b - 1) * 1.5;
+    const raw = {};
+    for (const f of FLOW_DEFS) raw[f.key] = this._num(f.key) || 0;
+    const peak = FLOW_DEFS.reduce(
+      (m, f) => (raw[f.key] > thr ? Math.max(m, raw[f.key]) : m), 0);
     const flows = {};
-    for (const f of FLOW_DEFS) flows[f.key] = this._num(f.key) || 0;
-    const active = FLOW_DEFS.filter((f) => flows[f.key] > thr);
-    const peak = active.reduce((m, f) => Math.max(m, flows[f.key]), 0);
     for (const f of FLOW_DEFS) {
-      const w = flows[f.key];
-      const flowEl = $(`flow-${f.key}`);
-      const railEl = $(`rail-${f.key}`);
+      const w = raw[f.key];
       if (w > thr) {
         // share of the current peak, on a sqrt curve so a flow at a third of
         // the peak still reads as clearly present rather than near-invisible
@@ -663,60 +721,92 @@ class CompactPowerFlowCard extends HTMLElement {
         // width by absolute power too, so "thick" keeps some real meaning.
         const absCap = MIN_FLOW_W + (maxW - MIN_FLOW_W) * Math.min(1, w / ABS_FULL_W);
         const width = Math.min(MIN_FLOW_W + (maxW - MIN_FLOW_W) * share, absCap);
-        flowEl.classList.add("active");
-        railEl.classList.add("active");
-        flowEl.style.strokeWidth = width.toFixed(2);
-        railEl.style.strokeWidth = width.toFixed(2);
-        // dash speed follows the same relative share as the thickness
-        const dur = Math.max(0.8, 4 - 3.2 * share);
-        flowEl.style.animationDuration = `${dur.toFixed(2)}s`;
+        // quarter-px quantization so width jitter doesn't count as a change
+        flows[f.key] = { active: true, width: Math.round(width * 4) / 4 };
       } else {
-        flowEl.classList.remove("active");
-        railEl.classList.remove("active");
+        flows[f.key] = { active: false, width: 0 };
       }
     }
 
     const pv = this._num("pv_total");
     const house = this._num("house");
     const soc = this._num("battery_soc");
-    const batNet = flows.pv_to_battery - flows.battery_to_house;
-    const gridNet = flows.grid_to_house; // import; export shown at PV->grid flow
+    const batNet = raw.pv_to_battery - raw.battery_to_house;
+    const gridNet = raw.grid_to_house; // import; export shown at PV->grid flow
+    const exporting = this._num("pv_to_grid") > gridNet;
 
-    $("val-pv").textContent = this._fmtW(pv);
-    $("val-house").textContent = this._fmtW(house);
-    $("sub-house").textContent = this._labels.house;
-    $("val-grid").textContent = this._fmtW(
-      this._num("pv_to_grid") > gridNet ? this._num("pv_to_grid") : gridNet
-    );
-    $("sub-grid").textContent =
-      this._num("pv_to_grid") > gridNet
-        ? this._labels.grid_export
-        : this._labels.grid_import;
-    $("val-battery").textContent = this._fmtW(Math.abs(batNet));
-    $("sub-battery").textContent =
-      Math.abs(batNet) > thr
+    const values = {
+      pv: this._fmtW(pv),
+      house: this._fmtW(house),
+      grid: this._fmtW(exporting ? this._num("pv_to_grid") : gridNet),
+      battery: this._fmtW(Math.abs(batNet)),
+    };
+    const subs = {
+      house: this._labels.house,
+      grid: exporting ? this._labels.grid_export : this._labels.grid_import,
+      battery: Math.abs(batNet) > thr
         ? (batNet > 0 ? this._labels.battery_charge : this._labels.battery_discharge)
-        : this._labels.battery;
-    const socArc = $("soc-arc");
-    const socPct = soc === null ? 0 : Math.min(100, Math.max(0, soc));
-    socArc.style.strokeDasharray = `${socPct.toFixed(1)} ${(100 - socPct).toFixed(1)}`;
-    // a zero-length dash with round caps would still paint a dot at 12 o'clock
-    socArc.style.opacity = socPct > 0 ? "1" : "0";
-
-    $("node-pv").classList.toggle("idle", (pv || 0) < this._config.pv_threshold);
-
+        : this._labels.battery,
+    };
     const yieldRaw = this._num("daily_yield");
     if (yieldRaw !== null) {
-      const st = this._hass.states[this._config.entities.daily_yield];
+      const st = hass.states[this._config.entities.daily_yield];
       const unit = (st.attributes.unit_of_measurement || "kWh").toLowerCase();
       const kwh =
         unit === "wh" ? yieldRaw / 1000 : unit === "mwh" ? yieldRaw * 1000 : yieldRaw;
-      $("sub-pv").textContent = `${this._labels.daily_yield} ${kwh.toFixed(1)} kWh`;
+      subs.pv = `${this._labels.daily_yield} ${kwh.toFixed(1)} kWh`;
     } else {
-      $("sub-pv").textContent = this._labels.pv;
+      subs.pv = this._labels.pv;
     }
 
-    this._renderConsumers(consumers, dark);
+    const socPct = soc === null ? 0 : Math.min(100, Math.max(0, soc));
+    const items = this._computeConsumers(hass);
+    // Half-px height quantization: a consumer wobbling by a few watts moves
+    // its segment sub-visibly — that must not count as a change either.
+    const heights = items.length
+      ? this._segmentHeights(items).map((h) => Math.round(h * 2) / 2)
+      : [];
+    return {
+      flows,
+      values,
+      subs,
+      socDash: `${socPct.toFixed(1)} ${(100 - socPct).toFixed(1)}`,
+      socVisible: socPct > 0,
+      pvIdle: (pv || 0) < this._config.pv_threshold,
+      consumers: items.map((c, i) => ({
+        id: c.id, name: c.name, value: this._fmtW(c.watts), h: heights[i],
+      })),
+      dark: !!(hass.themes && hass.themes.darkMode),
+    };
+  }
+
+  _applyText(model) {
+    const $ = (id) => this.shadowRoot.getElementById(id);
+    for (const k of ["pv", "grid", "house", "battery"]) {
+      $(`val-${k}`).textContent = model.values[k];
+      $(`sub-${k}`).textContent = model.subs[k];
+    }
+    const socArc = $("soc-arc");
+    socArc.style.strokeDasharray = model.socDash;
+    // a zero-length dash with round caps would still paint a dot at 12 o'clock
+    socArc.style.opacity = model.socVisible ? "1" : "0";
+    $("node-pv").classList.toggle("idle", model.pvIdle);
+    this._renderConsumers(model.consumers, model.dark);
+  }
+
+  _applyFlows(flows) {
+    const $ = (id) => this.shadowRoot.getElementById(id);
+    for (const f of FLOW_DEFS) {
+      const st = flows[f.key];
+      const flowEl = $(`flow-${f.key}`);
+      const railEl = $(`rail-${f.key}`);
+      flowEl.classList.toggle("active", st.active);
+      railEl.classList.toggle("active", st.active);
+      if (st.active) {
+        flowEl.style.strokeWidth = st.width;
+        railEl.style.strokeWidth = st.width;
+      }
+    }
   }
 
   getCardSize() {
