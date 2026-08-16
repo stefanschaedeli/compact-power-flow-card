@@ -81,6 +81,9 @@ pv_threshold: 50                             # optional, W: PV node dims below
 uniform_color: "#8a8a8a"                     # optional: one CSS color for ALL
                                              #   node rings + flow lines
                                              #   (unset = per-node theme colors)
+uniform_bars: true                           # optional (default false): paint the
+                                             #   consumer bars in uniform_color too
+                                             #   (needs uniform_color to be set)
 ```
 
 ### Top-consumers column
@@ -151,7 +154,9 @@ labels:            # optional per-key overrides, applied on top of the
 - **`uniform_color`** accepts any CSS color — hex, `rgb(...)`, or a theme
   variable like `var(--primary-color)` — and recolors all four node rings
   (including the battery SOC arc and its faint track) and all flow lines.
-  The top-consumers column keeps its own palette either way.
+  The top-consumers column keeps its own palette unless **`uniform_bars`**
+  (a toggle in the GUI editor) is also enabled — then every bar segment uses
+  `uniform_color` as well and no color differentiation remains.
 - **Unavailable sensors** render as `–` and their flows stay hidden — the card
   never throws on missing states.
 - Sizing in sections views: defaults to 12 columns × 3 rows

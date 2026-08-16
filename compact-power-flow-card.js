@@ -48,7 +48,12 @@
  *   uniform_color:       optional; one CSS color (hex, rgb(), var(--...))
  *                        applied to ALL node rings and flow lines instead of
  *                        the per-node theme colors. Unset = default colors.
- *                        The consumer column keeps its own palette.
+ *                        The consumer column keeps its own palette unless
+ *                        uniform_bars is set.
+ *   uniform_bars:        optional; true paints every consumer bar segment in
+ *                        uniform_color as well, killing the palette
+ *                        differentiation entirely (no effect while
+ *                        uniform_color is unset; default false)
  *   labels:              optional map overriding the auto-localized labels
  *                        (pv, grid, house, battery, grid_import, grid_export,
  *                        battery_charge, battery_discharge, daily_yield —
@@ -62,7 +67,7 @@
  * current charge/discharge power (no percentage is displayed).
  */
 
-const VERSION = "0.11.0";
+const VERSION = "0.12.0";
 
 // Consumer-column palette, shared with power-pie-card (CVD-safe hue order —
 // do not reorder).
@@ -343,6 +348,7 @@ class CompactPowerFlowCard extends HTMLElement {
     this._config.uniform_color =
       typeof config.uniform_color === "string" && config.uniform_color.trim()
         ? config.uniform_color.trim() : null;
+    this._config.uniform_bars = config.uniform_bars === true;
     this._configLabels = config.labels || {};
     this._labels = { ...LABEL_TABLES[this._lastLang || "en"], ...this._configLabels };
     const f = config.filter || {};
@@ -592,6 +598,8 @@ class CompactPowerFlowCard extends HTMLElement {
       g.innerHTML = "";
       return;
     }
+    const uniformBar =
+      this._config.uniform_bars ? this._config.uniform_color : null;
     const heights = this._segmentHeights(consumers);
     const values = consumers.map((c) => this._fmtW(c.watts));
     const parts = [];
@@ -615,7 +623,7 @@ class CompactPowerFlowCard extends HTMLElement {
       const name = c.name.length > maxNameChars
         ? `${c.name.slice(0, maxNameChars - 1)}…`
         : c.name;
-      const color = palette[i % palette.length];
+      const color = uniformBar || palette[i % palette.length];
       parts.push(`
         <rect class="seg" data-entity="${c.id}" x="${COL.x}" y="${top.toFixed(1)}"
               width="${COL.w}" height="${h.toFixed(1)}" rx="${COL.rx}" fill="${color}"/>
@@ -750,6 +758,7 @@ const EDITOR_LABELS = {
   pv_threshold: "Dim PV node below (W)",
   show_labels: "Show labels (names, direction words, daily yield)",
   uniform_color: "Uniform color for nodes + flow lines (any CSS color; empty = default colors)",
+  uniform_bars: "Apply the uniform color to the consumer bars too (no palette)",
 };
 
 const LABEL_EDITOR_HINTS = {
@@ -879,6 +888,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
       { name: "pv_threshold", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "W" } } },
       { name: "show_labels", selector: { boolean: {} } },
       { name: "uniform_color", selector: { text: {} } },
+      { name: "uniform_bars", selector: { boolean: {} } },
       ...LABEL_KEYS.map((k) => ({ name: `label_${k}`, selector: { text: {} } })),
     );
 
@@ -894,6 +904,7 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     for (const k of NUMBER_KEYS) if (c[k] !== undefined) data[k] = c[k];
     data.show_labels = c.show_labels !== false;
     if (c.uniform_color !== undefined) data.uniform_color = c.uniform_color;
+    data.uniform_bars = c.uniform_bars === true;
     const labels = c.labels || {};
     for (const k of LABEL_KEYS) if (labels[k] !== undefined) data[`label_${k}`] = labels[k];
 
@@ -934,6 +945,8 @@ class CompactPowerFlowCardEditor extends HTMLElement {
     } else {
       delete cfg.uniform_color;
     }
+    if (d.uniform_bars === true) cfg.uniform_bars = true;
+    else delete cfg.uniform_bars;
     const labels = {};
     for (const k of LABEL_KEYS) {
       const v = d[`label_${k}`];
