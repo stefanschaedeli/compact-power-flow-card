@@ -151,6 +151,10 @@ labels:            # optional per-key overrides, applied on top of the
   scale cannot do this: tuned for an 11 kW midday export it renders every
   night-time flow as a hairline, and tuned for night it clips everything above
   a couple of kW to the same width.
+- **Direction** is marked by a small filled arrowhead at each line's
+  midpoint (fixed size, outlined in the card background so it stays visible
+  on a line of the same color). Nothing animates — the card only repaints
+  when a displayed value changes.
 - An absolute cap applies on top, so a *lone* small flow still renders small
   rather than filling the full width just for being the only one active.
 - **Daily yield** replaces the static PV sub-label (`heute 12.4 kWh`) when

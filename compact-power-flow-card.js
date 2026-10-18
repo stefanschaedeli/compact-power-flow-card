@@ -1,7 +1,7 @@
 /* compact-power-flow-card
  *
  * A compact, dependency-free power-flow card for Home Assistant:
- * PV / grid / house / battery nodes with animated flow paths, plus an
+ * PV / grid / house / battery nodes with static, direction-arrowed flow lines, plus an
  * optional stacked column of the top current power consumers (filtered
  * the same way as power-pie-card) and the daily yield at the PV node.
  * The house node and that consumer column read as one unit: a rounded
@@ -1060,7 +1060,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "compact-power-flow-card",
   name: "Compact Power Flow Card",
-  description: "Compact animated power flow (PV, battery, grid, house) with a top-consumers column",
+  description: "Compact, kiosk-friendly power flow (PV, battery, grid, house) with static direction-arrowed lines and a top-consumers column",
   documentationURL: "https://github.com/stefanschaedeli/compact-power-flow-card",
 });
 
